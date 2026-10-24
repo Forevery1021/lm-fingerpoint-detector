@@ -1,0 +1,134 @@
+---
+title: Data files
+description: The official reference samples, derived fingerprint bank, frozen detector, fixed challenges, and tokenizer bank in the data/ directory, and their change log.
+icon: Database
+---
+
+`data/` holds the official reference samples, the derived fingerprint bank, the frozen detector parameters, the fixed sampling challenges, and the tokenizer bank of the tokenizer probe.
+
+```files
+data
+├── unified_reference.jsonl
+├── unified_bank.json
+├── shared_detector.bin
+├── enrollment-suite.json
+├── tokenizer_bank.json
+└── collections
+```
+
+| File | Content |
+| --- | --- |
+| `unified_reference.jsonl` | Reference batches. Each line holds one version-1 batch: the model, channel, and call settings are shared, and the answers are in the `samples` array |
+| `unified_bank.json` | Statistics derived from the reference batches |
+| `shared_detector.bin` | Frozen ranker and calibration parameters, bound to the reference data by SHA-256. A JSON header plus float32 values, written by `fpd retrain` and read through `shared/detector-codec.ts` |
+| `enrollment-suite.json` | The 36 fixed sampling challenges. This file is sampling input, not reference answers |
+| `tokenizer_bank.json` | Tokenizer bank: probe texts, per-class counts, and model mappings for the tokenizer probe |
+| `collections/` | Sampling requests, attempts, and provenance checks |
+
+`collections/` is not used for scoring and is not copied into the public data of the website. Reference rows from before a rename, retirement, or format migration are not kept as separate copies. Retrieve them from the git history when needed. For the fields of batches and samples, see [Sampling and resuming](../cli/sampling.mdx#batch-format).
+
+## Maintenance rules
+
+- `fpd sample`, `fpd enroll DIR`, and `fpd retrain --data-dir DIR` can all run outside the repository. Enrollment validates complete batches and raw evidence, deduplicates by model, channel, condition, challenge, and text, and rebuilds the derived bank. Retraining fits the ranker and the confidence calibration offline from the target reference bank. If nested calibration fails, `shared_detector.bin` is not replaced. Training evidence is saved in `.training/`.
+- The data bundled with the CLI is read-only. The maintenance destination must be specified explicitly, or confirmed after the CLI detects this repository during interactive enrollment.
+- The fixed evaluation set must not be added to the reference bank, the model centroids, or the calibration.
+- The website build writes redacted data to `web/public/data/`. That directory is a build output and must not be maintained as a second official bank.
+
+## Tokenizer bank
+
+`tokenizer_bank.json` is generated offline from 290 open tokenizers by `token-fp export-api-bank` of the tokenizer archive tool llm-tokenizer-fingerprint. It is independent of the reference samples. An update replaces the whole file directly and does not go through `fpd enroll`.
+
+| Field | Content |
+| --- | --- |
+| `schema` | Always `tokenizer-bank-v1` |
+| `source` | Generating tool, tokenizer count, and candidate text count. `archive_manifest_sha256` records the hash of the archive manifest used, and `excluded` lists the repositories that were not exported because their archived files are untrusted, with the reasons |
+| `wrapper` | The fixed prefix and suffix of every request: `prefix` and `suffix` |
+| `probes` | ID, category, and text of each probe text |
+| `classes` | Lab, series, members, and aliases of each tokenizer class, and its count difference for each probe text in `counts`. When members disagree, `alternatives` lists their values separately |
+| `api_models` | Mapping from vendor models to tokenizer classes. A `class` of `null` means the vendor has not published its tokenizer |
+
+Tokenizer classes are grouped by authoring lab and series. Tokenizers with identical counts form one class, and classes of one lineage that differ on only a few texts are merged. For the full list of classes, see [How the tokenizer probe works](../principles/tokenizer.mdx#classes).
+
+## Change log
+
+<Accordions type="multiple">
+  <Accordion title="2026-10-17 Add deepseek-v4.1-flash-1017" id="2026-10-17-deepseek-flash-1017">
+    `deepseek-v4.1-flash-1017` requests `deepseek/deepseek-v4.1-flash` through the fixed `openrouter/deepseek` official provider route. Fallbacks are disabled. Collection uses streaming Chat Completions with `reasoning_effort=low`.
+
+    The `1017` label follows the [DeepSeek official October 17 release notes](https://api-docs.deepseek.com/updates/), which state that the stable API alias was upgraded. The OpenRouter catalog still names `20260910`. Raw responses return the undated model ID and do not independently attest the dated version. Evidence is saved in `collections/deepseek-v4.1-flash-1017-openrouter-deepseek-low-20261017/`.
+
+    This enrollment adds two independent fixed evaluation groups of three answers with the same provider and `low` effort. Evaluation answers do not enter bank construction, training, or calibration.
+
+    All 36 reference answers and six independent evaluation answers completed naturally on their first attempt. The bank contains 60 identities and 2,236 samples. Both new groups ranked the new label first after retraining. Correct predictions on the previous 118 complete groups fell from 107 to 105. The first old `deepseek-v4.1-flash` group and the second `gpt-5.4` group changed to `1017`. Evaluation covers 120 of 122 groups and 360 of 366 answers, with 107 of 120 complete groups correct.
+  </Accordion>
+  <Accordion title="2026-10-14 Add gemini-4-argon" id="2026-10-14-gemini-4-argon">
+    Added 36 fixed-challenge answers for `gemini-4-argon`. The reference bank now contains 59 fingerprint identities and 2,200 samples. Collection requests `google/gemini-4-argon` through streaming OpenRouter Chat Completions, with `reasoning_effort=low` and the fixed `openrouter/google-ai-studio` route. Fallbacks are disabled. All 36 answers passed validation on the first attempt. Of these, 33 completed naturally. `query-10`, `query-25`, and `query-36` stopped at 500 integers and retain their truncation markers.
+
+    Returned model IDs and Google AI Studio provider metadata passed checks against the raw responses. Sampling evidence and the enrollment receipt are saved in `collections/gemini-4-argon-openrouter-google-ai-studio-low-20261014/`. This enrollment also adds two independent fixed evaluation groups of three answers, with the same provider and `low` reasoning effort. Evaluation answers do not enter bank construction, training, or calibration.
+
+    After retraining, both new evaluation groups ranked `gemini-4-argon` first. Predictions on the previous 116 complete groups did not change: 105 were correct before and after enrollment. Evaluation covers 118 of 120 planned groups and 354 of 360 answers, with 107 of 118 complete groups correct. The two missing groups belong to `kimi-k2.8-preview`.
+  </Accordion>
+  <Accordion title="2026-10-13 Add muse-wonder" id="2026-10-13-muse-wonder">
+    Added 36 fixed-challenge answers for `muse-wonder`. The reference bank now contains 58 fingerprint identities and 2,164 samples. Collection requests `meta/muse-wonder` through streaming OpenRouter Chat Completions, with `reasoning_effort=low` and the fixed `openrouter/meta` route. Fallbacks are disabled. All 36 answers completed naturally on the first attempt, without truncation. Returned model IDs and Meta provider metadata passed checks against the raw responses.
+
+    Sampling evidence and the enrollment receipt are saved in `collections/muse-wonder-openrouter-meta-low-20261013/`. This enrollment also adds two independent fixed evaluation groups of three answers, with the same provider and `low` reasoning effort. Evaluation answers do not enter bank construction, training, or calibration.
+  </Accordion>
+  <Accordion title="2026-10-11 Store the detector as binary shared_detector.bin" id="2026-10-11-detector-bin">
+    The detector parameters are now stored in `shared_detector.bin`: a JSON header plus float32 values. The website downloads 3.37 MB for the detector instead of 9.75 MB. Holdout predictions and rankings did not change (116/116 groups identical; maximum confidence change 1.8e-7). `import_manifest.json` was removed.
+  </Accordion>
+  <Accordion title="2026-10-08 Remove muse-spark-1.3-contributor" id="2026-10-08-muse-contributor">
+    The maintainer confirmed that `muse-spark-1.3-contributor` and `muse-spark-1.3` are the same model. The two reference batches of the former (36 answers, channel `openrouter/unknown`) were removed. The bank now contains 57 fingerprint identities and 2,128 samples. The two reference rows before the removal can be retrieved from the git history.
+
+    Before the removal, leave-one-environment-out checks on the reference bank separated only 33–37 of 72 answers between the two labels. This result did not differ from labels shuffled within each environment. The fixed evaluation set keeps the collection records of this model. The evaluator lists it as a retired model and does not count it in the planned groups.
+  </Accordion>
+  <Accordion title="2026-10-08 Add a position/order discriminant to the ranker" id="2026-10-08-ranker-v2">
+    `shared_detector.json` now uses `shared-detector-v2`. The ranking score gives equal weights to the frequency ranking and the position/order discriminant. See [Ranking and calibration](../principles/ranking.mdx) for the method. Leave-one-environment-out cross-validation on the 58-identity reference bank selected the weights and the shrinkage from a grid declared in advance. The previous ranker scored 631 of 696 groups, and the new ranker scored 642 of 696. A joint generation process model added only 1 group as a third component, and the nested selection did not choose it consistently. It is not part of the product.
+
+    Retraining after the removal of `muse-spark-1.3-contributor` gave nested top-1 of 641/684, binary NLL of 0.138 (constant baseline 0.235), AUC of 0.931, and temperature τ of 4.781. Fixed evaluation scored 103 of 114 complete groups. On the same 114 groups, the previous ranker retrained on the same bank scored 100 of 114. The fixed evaluation set was used only for evaluation, not for selection or calibration.
+
+    In fixed evaluation, 13 answers had a smallest valid number of at least 200 (from claude-haiku-4.5, gpt-6-sol, gpt-5.4, and gpt-5.6-terra). At the maintainer's request, these slots were retested with new prompts of the same count, with the official provider pinned. All earlier attempts are kept. The smallest values of the retested answers are 1–103.
+  </Accordion>
+  <Accordion title="2026-10-08 Merge the GPT-6 Astra and GPT-6.1 Sol fingerprint identities" id="2026-10-08-astra-sol">
+    At the maintainer's request, `gpt-6-astra` and `gpt-6.1-sol` share one fingerprint class. Its internal ID is `gpt-6-astra`, and the interface shows it as `gpt-6-astra/6.1-sol` (batch field `model.display_name`). Both batches contribute their 36 answers to the bank and ranker training. The bank now contains 58 fingerprint identities and 2,164 samples. Requested models, returned models, sample IDs, collection channels, and raw evidence retain their original values. The two reference rows before the rename can be retrieved from the git history.
+
+    Detection reports the combined class and no longer ranks the two names separately. When this class ranks first, the website notes that the number fingerprint cannot reliably tell the two models apart. Fixed evaluation retains all four groups and 12 answers from the two requested models. It displays their original collection labels and maps both truths to the combined class. Predictions that confused these names count as correct under the combined labels. A change in hit count therefore includes the effect of merging labels and does not directly show better model separation.
+  </Accordion>
+  <Accordion title="2026-10-08 Add claude-haiku-5.5" id="2026-10-08-haiku-5.5">
+    Added 36 fixed-challenge answers for `claude-haiku-5.5`. The reference bank now contains 59 models and 2,164 samples. The requested model is `anthropic/claude-haiku-5.5`. Collection uses streaming OpenRouter Chat Completions, `reasoning_effort=low`, and the fixed `openrouter/anthropic` channel with fallbacks disabled. Prompts and system prompts come from the fixed challenge suite.
+
+    The first three local requests returned HTTP 403 because of a regional restriction. Collection then resumed the same batch on Ikaleio-TYO. All 36 answers completed naturally, without truncation. The returned model and Anthropic provider metadata passed checks against the raw responses. Sampling evidence, the three failed attempts, and the enrollment receipt are saved in `collections/claude-haiku-5.5-openrouter-anthropic-low-20261008/`. The existing fixed evaluation set does not yet cover this new model.
+  </Accordion>
+  <Accordion title="2026-10-03 Expand the Seed and Qwen reference models" id="2026-10-03-seed-qwen">
+    Added `seed-2.1-turbo`, `seed-2.0-lite`, `seed-2.0-mini`, `qwen3.8-flash`, and `qwen3.8-omni-flash`, each with 36 fixed-challenge answers. The reference bank now contains 58 models and 2,128 samples. All five batches use the same fixed prompts and streaming OpenRouter Chat Completions. Seed is pinned to `openrouter/seed/fp8` and Qwen to `openrouter/alibaba`, with fallbacks disabled.
+
+    Collection initially used default reasoning effort. Turbo's seventh attempt at `query-15` used `low`. At the user's request, remaining pending challenges then used `none` to disable reasoning: 13 Turbo answers, 29 Flash answers, and 6 Omni-Flash answers. Previously accepted answers retain their settings; prompts and prefixes did not change. Actual parameters, selected attempts, original responses, failures, and enrollment receipts are saved in `collections/seed-qwen-20261003/`. The earlier rate-limited Flash batch is retained but was not enrolled.
+
+    All batches stop automatically at 500 integers and retain the `truncated` status: 7 Turbo answers, 7 Lite answers, 4 Mini answers, 4 Flash answers, and 4 Omni-Flash answers. All other answers completed naturally. Enrollment checks returned models and provider metadata in the raw responses. Detection rankings do not select the answers. The existing fixed evaluation set does not yet cover these five new models.
+  </Accordion>
+  <Accordion title="2026-10-01 Map gpt-5.x and the gpt-6 series to o200k_base" id="2026-10-01-gpt-tokenizer">
+    The OpenAI o200k_base mapping in `tokenizer_bank.json` now covers every model whose name starts with `gpt-5` or `gpt-6` (confirmed by the maintainer). `gpt-5` already covered gpt-5.x. Before this change, the only `gpt-6` model with a mapping was gpt-6-astra, through an alias of the o200k class; that alias is removed. These models are checked as a vendor-published tokenizer, so only an exact match is consistent. The ranking does not change. This is a manual edit of a generated file: before you run `token-fp export-api-bank` again, add these mappings to the generator.
+  </Accordion>
+  <Accordion title="2026-09-30 Six OpenAI reference models move to direct access with low reasoning effort" id="2026-09-30-openai-direct">
+    All 16 `codex-subscription` batches (216 answers, reasoning effort not recorded) of gpt-5.4, gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, and gpt-6-astra left the official bank. The original rows can be retrieved from the git history. A paired study (`research/studies/astra-sol-separation/`) found that the collection channels and reasoning settings of the earlier reference batches were inconsistent, which interfered with the fingerprint comparison of gpt-6-astra and gpt-6.1-sol. The new batches call the Responses API of `api.openai.com` directly from a local machine with an OpenAI key, streaming with `reasoning_effort=low`, the same as `gpt-6-sol`. Each completed the 36 fixed challenges with the same prompts and system prompts as the earlier batches, and the evidence is saved in `collections/<model>-openai-direct-20260930/`. The returned models are `gpt-5.4-2026-03-05` and `gpt-5.5-2026-04-23`; the others match the requested names. Truncated at the sampling limit: 7 answers of gpt-5.6-luna, 1 of gpt-5.6-terra, and 1 of gpt-5.4; all others completed naturally. All failed attempts are kept: 4 dropped connections for gpt-6-astra and 3 for gpt-5.4, and too few valid numbers once for gpt-5.6-terra and twice for gpt-5.6-luna. Each of them succeeded on the next attempt.
+  </Accordion>
+  <Accordion title="2026-09-30 Add gpt-6.1-sol and normalize the Claude labels" id="2026-09-30">
+    Added 36 fixed-challenge answers for `gpt-6.1-sol`, with the evidence in `collections/gpt-6.1-sol-openrouter-openai-20260930/`. The requests used the OpenRouter model `openai/gpt-6.1-sol` with streaming Chat Completions, `reasoning_effort=low`, and the fixed `openrouter/openai` channel (no fallback). All 36 answers were checked against the returned model and OpenAI provider metadata; all completed naturally, with no failures or truncation.
+
+    On the same day, the Claude reference labels switched to dotted version numbers (for example `claude-opus-5.5`), and the label of `claude-haiku-4-5-20251001` became `claude-haiku-4.5`. Requested model names and raw sampling evidence keep the upstream values; the 25 rows before the rename can be retrieved from the git history. The `gpt-6-sol-20260922` batch left the reference bank; its raw row can also be retrieved from the git history.
+  </Accordion>
+  <Accordion title="2026-09-29 Add claude-sonnet-5.5" id="2026-09-29">
+    Added 36 fixed-challenge answers for `claude-sonnet-5.5`. The evidence is saved in `collections/claude-sonnet-5.5-openrouter-anthropic-20260929/`. The requests used the official OpenRouter model `anthropic/claude-sonnet-5.5` with Chat Completions, the default reasoning effort, and the fixed `openrouter/anthropic` channel (fallback disabled). All 36 answers were checked against the returned model and the Anthropic provider metadata. All of them completed naturally, with no failures or truncation.
+  </Accordion>
+  <Accordion title="2026-09-28 gpt-6-sol moves to direct OpenAI access" id="2026-09-28">
+    The original `gpt-6-sol` reference batch (36 answers collected through `openrouter/openai` on 2026-09-22) was relabeled `gpt-6-sol-20260922`. It keeps the original requested model name, channel, and sampling evidence. The new `gpt-6-sol` batch was collected on Ikaleio-TYO by calling the Responses API of `api.openai.com` directly with an OpenAI key. It completed the same 36 fixed challenges with `reasoning_effort=low`. Of these answers, 34 completed naturally and 2 were truncated at the sampling limit. The raw evidence is saved in `collections/gpt-6-sol-openai-direct-20260928/`. The first Chat Completions requests returned HTTP 400 because the API does not support `max_tokens`. The 3 failed records are saved in `collections/gpt-6-sol-openai-direct-cc-20260928/` and were not enrolled. From then on the two labels were scored separately, until `gpt-6-sol-20260922` left the reference bank on 2026-09-30. Because the channels and APIs differ, a difference between model versions cannot be inferred from the reference bank ranking alone.
+  </Accordion>
+  <Accordion title="2026-09-26 DeepSeek moves to pinned providers" id="2026-09-26">
+    All 15 batches without a pinned provider (216 answers) for six DeepSeek models were retired from the official bank. The original rows can be retrieved from the git history, and the original sampling attempts stay in the research directory. The new reference batches are saved per model in `collections/deepseek-*-20260926/`. V4.1 Flash and V4 Pro 0813 each have 36 answers pinned to `openrouter/deepseek`. Flash 0731, Pro Preview, Flash Preview, and V3.2 each have 36 answers pinned to `openrouter/novita`. For Flash 0731, the 11th attempt of `query-11` and the 12th attempt of `query-23` override only `reasoning_effort=low`, and all original failures are kept. The discontinued SiliconFlow backup batches stay in `collections/` but were not enrolled. The official bank includes only complete batches that pass the provenance check. It does not let OpenRouter fall back automatically or mix answers from different providers.
+  </Accordion>
+  <Accordion title="2026-09-14 K3 moves to a pinned source" id="2026-09-14">
+    The K3 update replaces the earlier 36 answers without a pinned provider with 36 answers pinned to the MoonshotAI source, with thinking disabled. The new batch is in `collections/kimi-k3-moonshotai-20260914/`. The old batch can be retrieved from the git history. See the manifest of the new batch for the prefix versions and the effective attempts.
+  </Accordion>
+  <Accordion title="Schema cutover" id="schema-cutover">
+    The 1,804 reference rows from before the schema cutover can be retrieved from the git history. The new format keeps all sample IDs, answers, prompts, and their order. An unknown completion status is not turned into success. The runtime no longer reads the old format. Historical requests and failed attempts are still kept.
+  </Accordion>
+</Accordions>
